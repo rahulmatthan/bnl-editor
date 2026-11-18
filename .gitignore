@@ -1,0 +1,6 @@
+__pycache__/
+*.tmp
+# the Mac library: drafts are the user's, not part of the editor
+instruments/
+# notes for local Claude sessions
+CLAUDE.md

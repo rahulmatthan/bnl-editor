@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BNL Editor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="bar">
+  <a id="home" href="#/" title="All instruments">BNL Editor</a>
+  <span id="doctitle"></span>
+  <span id="status" class="status"></span>
+  <span class="spacer"></span>
+  <div id="modes" class="seg" hidden>
+    <button data-mode="edit" class="on">Edit</button>
+    <button data-mode="read">Read</button>
+    <button data-mode="xml">XML</button>
+  </div>
+  <button id="undo" class="ghost" hidden title="Undo the last structural change">Undo</button>
+  <button id="save" hidden title="Save and check (⌘S)">Save</button>
+</header>
+
+<main id="library" hidden>
+  <section class="lib">
+    <h1>Instruments</h1>
+    <p class="lede">Legislation in Bharat Niti Lipi: Akoma Ntoso with the BNL attributes, checked against the
+      BNL <span id="libver"></span> rulebook on every save.</p>
+    <p id="localnote" class="note" hidden>Your drafts are kept in this browser only. Nothing is sent anywhere.
+      Use <b>Download XML</b> (in the Instrument tab) to keep a copy or send it to someone; clearing this
+      browser's data deletes them.</p>
+    <ul id="items"></ul>
+    <p id="openwrap" hidden><label class="filebtn">Open a BNL file (.xml)… <input type="file" id="openfile" accept=".xml,application/xml,text/xml"></label></p>
+    <div class="cols">
+      <form id="newform" class="card">
+        <h2>New Bill</h2>
+        <label>Title <input name="title" placeholder="The Model Public Records Bill, 2026" required></label>
+        <label>Year <input name="year" placeholder="2026" size="6"></label>
+        <button>Create</button>
+      </form>
+      <form id="importform" class="card">
+        <h2>Import a Bill from text</h2>
+        <p class="hint">Paste the Bill, or choose a Word (.docx), .txt or .md file. CHAPTER headings, "8. Heading.—(1) text",
+          (1), (a), (i), provisos, Explanations and a closing SCHEDULE are recognised; anything else comes in
+          as paragraphs to fix by hand.</p>
+        <label>Title (optional) <input name="title" placeholder="taken from the text"></label>
+        <textarea name="text" rows="8" placeholder="THE … BILL, 2026&#10;A BILL to …&#10;BE it enacted …&#10;1. Short title and commencement.—(1) …"></textarea>
+        <div class="row"><input type="file" id="importfile" accept=".docx,.txt,.md,text/plain"><button>Import</button></div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<div id="editor" hidden>
+  <nav id="outline"></nav>
+  <main id="pagewrap"><div id="banner" hidden></div><article id="page"></article></main>
+  <aside id="side">
+    <div class="tabs">
+      <button data-tab="prov" class="on">Provision</button>
+      <button data-tab="inst">Instrument</button>
+      <button data-tab="checks">Checks <span id="checkcount"></span></button>
+      <button data-tab="stages">Stages</button>
+    </div>
+    <div id="tab-prov" class="tab"></div>
+    <div id="tab-inst" class="tab" hidden></div>
+    <div id="tab-checks" class="tab" hidden></div>
+    <div id="tab-stages" class="tab" hidden></div>
+  </aside>
+</div>
+<div id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Publishes the web version (the editor running entirely in the browser) to GitHub Pages.
+# Runs on every push to main (and by hand). Served at https://exmachina.in/bnl-editor/
+name: Publish web version
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.d.outputs.page_url }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir _site
+          cp -r web/* _site/
+          mkdir _site/spec && cp spec/bnl-0.1/*.xsd spec/bnl-0.1/rules.sch _site/spec/
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+      - id: d
+        uses: actions/deploy-pages@v4

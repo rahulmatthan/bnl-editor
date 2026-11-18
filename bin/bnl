@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""bnl: the BNL Editor from the command line.
+
+  bnl serve                       run the editor on http://127.0.0.1:47650/
+  bnl list                        the instruments in the library
+  bnl import FILE [--title T]     a Bill from .txt, .md or .docx (via macOS textutil) into the library
+  bnl add FILE.xml                an existing BNL/Akoma Ntoso file into the library, unchanged
+  bnl check FILE.xml|ID           schema, BNL rulebook and editor checks
+  bnl verify ID                   the authentication record of an instrument
+  bnl show [ID]                   open the editor (or one instrument) on the Desk canvas
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(os.path.realpath(__file__)).parent.parent
+sys.path.insert(0, str(ROOT))
+from bnl import akn, bill, checks, stages  # noqa: E402
+
+LIB = Path(os.environ.get("BNL_LIBRARY", ROOT / "instruments"))
+URL = "http://127.0.0.1:47650/"
+
+
+def resolve(arg):
+    p = Path(arg)
+    if p.suffix == ".xml" and p.exists():
+        return p
+    q = LIB / arg / f"{arg}.xml"
+    if q.exists():
+        return q
+    sys.exit(f"bnl: no file or instrument called {arg}")
+
+
+def text_of(path: Path) -> str:
+    if path.suffix.lower() in (".docx", ".doc", ".rtf"):
+        r = subprocess.run(["textutil", "-convert", "txt", "-stdout", str(path)], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit("bnl: textutil could not read " + str(path))
+        return r.stdout
+    return path.read_text()
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "serve":
+        os.execvp(sys.executable, [sys.executable, str(ROOT / "server.py")])
+    import server
+    if cmd == "list":
+        for d in server.library():
+            print(f"{d['id']:40} {d.get('uri', ''):40} {d['stages']} stage(s)  {d['title']}")
+    elif cmd == "import":
+        if not rest:
+            sys.exit("bnl import FILE [--title T]")
+        title = rest[rest.index("--title") + 1] if "--title" in rest else None
+        root = bill.import_text(text_of(Path(rest[0])), title)
+        alias = root.find(f".//{akn.q('FRBRalias')}").get("value")
+        i = server.create(root, title or alias)
+        res = checks.run(server.xml_path(i))
+        print(f"{i}: {checks.summary(res)}  {URL}#/i/{i}")
+    elif cmd == "add":
+        src = Path(rest[0])
+        root = akn.parse(src.read_bytes())
+        i = server.unique_id(src.stem)
+        (LIB / i).mkdir(parents=True)
+        shutil.copyfile(src, LIB / i / f"{i}.xml")
+        print(f"{i}: added unchanged  {URL}#/i/{i}")
+    elif cmd == "check":
+        res = checks.run(resolve(rest[0]))
+        for r in res:
+            where = r["eId"] or (f"line {r['line']}" if r["line"] else "")
+            print(f"{r['level']:8} {r['code']:9} {r['message']}  {where}")
+        print(json.dumps(checks.summary(res)))
+        sys.exit(1 if any(r["level"] == "error" for r in res) else 0)
+    elif cmd == "verify":
+        f = resolve(rest[0]).parent
+        v = stages.verify(f)
+        log = {e["n"]: e for e in stages.read_log(f)}
+        for x in v:
+            e = log[x["n"]]
+            print(f"{x['n']:>2} {'ok ' if x['ok'] else 'BAD'} {e['date']} {e['label']} — {e['officer']}  {'; '.join(x['problems'])}")
+        if not v:
+            print("no stages authenticated")
+        sys.exit(0 if all(x["ok"] for x in v) else 1)
+    elif cmd == "show":
+        url = URL + (f"#/i/{rest[0]}" if rest else "")
+        os.execvp("desk", ["desk", "show", url])
+    else:
+        sys.exit(f"bnl: unknown command {cmd}\n\n{__doc__.strip()}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
