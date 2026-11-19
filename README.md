@@ -63,6 +63,22 @@ Schedule shall be amended in the manner specified therein."); or choose *A new B
 title. Adding the same mark-up again remakes its Part in place. Each paragraph is the source of its
 textualMods, so the check ED-11 is satisfied.
 
+## Objects and reasons, notes on clauses
+
+An Indian Bill explains itself after its text. In the Instrument tab of a Bill:
+
+- **Begin the Statement of Objects and Reasons** adds the Statement: two paragraphs for why the law is
+  needed, a third listing what the Bill provides (from its chapters), the closing sentence, and the
+  place, date and Minister's signature.
+- **Begin / Update the Notes on Clauses** gives every clause a note, its first sentence written from
+  the clause's heading ("This clause seeks to provide for establishment of the Digital Gazette."). The
+  reasons are the drafter's to add, in the note itself or in the *Note on this clause* box of the
+  Provision tab. Notes follow their clauses when clauses move or are renumbered, and go when a clause
+  is deleted; a clause with no note is a warning (ED-12).
+
+Both are attachments of the Bill (`<doc name="objectsAndReasons">`, `<doc name="notesOnClauses">`),
+after any Schedule, and are published with it.
+
 ## Publishing
 
 *Save* keeps the draft. *Publish* saves, checks, and (if there are no errors) gives the three forms

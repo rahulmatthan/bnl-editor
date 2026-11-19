@@ -118,6 +118,12 @@ function prov(x, ctx) {
     if (ctx.toc && id && HEADED.has(name)) ctx.toc.push({ id, label: `${num} ${txt(head)}`.trim() });
     return `<section class="sec k-${name}"${idAttr(x)}><h3>${num ? self + " " : ""}${head ? inline(head, ctx) : ""}</h3>${blocks(x, ctx)}</section>`;
   }
+  if (name === "hcontainer" && x.getAttribute("name") === "noteOnClause" && head) {
+    // "Clause 7.—This clause seeks to provide for …", as Notes on Clauses are printed
+    const lead = `<b>${inline(head, ctx)}.</b>—`;
+    const b = blocks(x, ctx);
+    return `<div class="noc"${idAttr(x)}>${/^<div class="content"[^>]*><p[^>]*>/.test(b) ? b.replace(/^(<div class="content"[^>]*><p[^>]*>)/, `$1${lead}`) : `<p>${lead}</p>${b}`}</div>`;
+  }
   let body = blocks(x, ctx);
   let lead = name === "hcontainer" && head ? `<span class="xhead">${inline(head, ctx)}</span>` : "";
   if (num) lead = self + " " + lead;
@@ -166,6 +172,11 @@ td, th { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
 .attachment { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); }
 .attachment .preface p { margin: 0 0 6px; }
 .attachment .preface .title { font-weight: 700; font-size: 18px; }
+.noc { margin: 0 0 10px; }
+.noc p { text-indent: 2em; }
+p.place, p.date { margin: 18px 0 0; }
+p.date { margin-top: 0; }
+p.signature { text-align: right; font-weight: 700; margin-top: 0; }
 .qs { display: block; margin: 6px 0 6px 2em; }
 .notes { margin-top: 30px; border-top: 1px solid var(--line); padding-top: 8px; font-size: 14px; }
 footer.colophon { margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--line); font: 12px/1.5 var(--ui); color: var(--muted); }

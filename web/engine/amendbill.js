@@ -494,10 +494,14 @@ export function addToSchedule(billDoc, baseDoc, workDoc, { markupId = "" } = {})
   // the Schedule
   let atts = kid(billEl, "attachments");
   if (!atts) atts = sub(billEl, "attachments");
-  let att = kids(atts).find(a => a.localName === "attachment");
+  // the Schedule, not the Statement of Objects and Reasons or the Notes on Clauses that follow it
+  const isSched = a => { const d = kid(a, "doc"); return !d || !d.getAttribute("name") || d.getAttribute("name") === "schedule"; };
+  let att = kids(atts).find(a => a.localName === "attachment" && isSched(a));
   let main;
   if (!att) {
     att = sub(atts, "attachment", null, { eId: "tmp_import" });
+    const firstOther = kids(atts).find(a => a !== att && a.localName === "attachment");
+    if (firstOther) atts.insertBefore(att, firstOther);
     const sd = sub(att, "doc", null, { name: "schedule" });
     scheduleMeta(sd, btitle, "THE SCHEDULE", byear, bnum, new Date().toLocaleDateString("en-CA"), 1);
     const pre = sub(sd, "preface");

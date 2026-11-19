@@ -190,6 +190,22 @@ def editor(root, is_bill: bool) -> list:
         if b in ("inferred", "contested"):
             target = el.get("eId") or _nearest_eid(el, parent)
             out.append(_result("info", "REVIEW", f"A link marked {b}: confirm it.", eid=target))
+
+    # Notes on clauses: once a Bill has them, every section has one, and every note says something.
+    noc = [d for d in root.iter(akn.q("doc")) if d.get("name") == "notesOnClauses"]
+    if noc:
+        noted, notes = set(), [h for h in noc[0].iter(akn.q("hcontainer")) if h.get("name") == "noteOnClause"]
+        for n in notes:
+            head = n.find(akn.q("heading"))
+            ref = head.find(akn.q("ref")) if head is not None else None
+            if ref is not None:
+                noted.add((ref.get("href") or "")[1:])
+            if not any("".join(p.itertext()).strip() for p in n.iter(akn.q("p"))):
+                out.append(_result("warning", "ED-12", "This note on clauses has no text.", eid=n.get("eId")))
+        body = root.find(f".//{akn.q('body')}")
+        for s in (body.iter(akn.q("section")) if body is not None else []):
+            if s.get("eId") and s.get("eId") not in noted:
+                out.append(_result("warning", "ED-12", "This clause has no note in the Notes on Clauses.", eid=s.get("eId")))
     return out
 
 

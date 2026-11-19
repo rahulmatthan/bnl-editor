@@ -189,6 +189,22 @@ export function editor(doc, isBill) {
     const b = el.getAttributeNS(BNL, "basis");
     if (b === "inferred" || b === "contested") out.push(r("info", "REVIEW", `A link marked ${b}: confirm it.`, null, nearestEid(el)));
   }
+
+  // Notes on clauses: once a Bill has them, every section has one, and every note says something.
+  const noc = Array.from(root.getElementsByTagNameNS(AKN, "doc")).find(d => d.getAttribute("name") === "notesOnClauses");
+  if (noc) {
+    const noted = new Set();
+    for (const n of Array.from(noc.getElementsByTagNameNS(AKN, "hcontainer")).filter(h => h.getAttribute("name") === "noteOnClause")) {
+      const head = kid(n, "heading"), ref = head && kid(head, "ref");
+      if (ref) noted.add((ref.getAttribute("href") || "").slice(1));
+      if (!Array.from(n.getElementsByTagNameNS(AKN, "p")).some(p => p.textContent.trim()))
+        out.push(r("warning", "ED-12", "This note on clauses has no text.", null, n.getAttribute("eId")));
+    }
+    const body = root.getElementsByTagNameNS(AKN, "body")[0];
+    for (const s of body ? body.getElementsByTagNameNS(AKN, "section") : [])
+      if (s.getAttribute("eId") && !noted.has(s.getAttribute("eId")))
+        out.push(r("warning", "ED-12", "This clause has no note in the Notes on Clauses.", null, s.getAttribute("eId")));
+  }
   return out;
 }
 

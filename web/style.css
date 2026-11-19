@@ -229,6 +229,9 @@ body.read [data-ph]:empty { display: none; }
 #pubdlg button:disabled { opacity: .45; cursor: not-allowed; }
 #pubdlg .sha { word-break: break-all; font-size: 11px; }
 @media (max-width: 560px) { .pubrow { flex-direction: column; align-items: stretch; } }
+#page p.t.place { margin-top: 18px; }
+#page p.t.signature { text-align: right; font-weight: 700; }
+textarea.noteta { width: 100%; font: 14px/1.45 var(--law); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); resize: vertical; }
 .status.go { cursor: pointer; }
 .status.go:hover { filter: brightness(.95); text-decoration: underline; }
 .issue { font: 12px/1.4 var(--ui); margin: 2px 0 6px; padding: 3px 8px; border-radius: 6px; cursor: pointer; user-select: none; }

@@ -481,6 +481,8 @@ function renderInspector() {
       confirmButton("Delete", () => removeProv(x))));
   }
 
+  const nb = noteBox(x, ro); if (nb) t.append(nb);
+
   // BNL attributes
   t.append(h("h3", {}, "BNL attributes"));
   const ext = x.getAttributeNS(BNL, "extent"), basis = x.getAttributeNS(BNL, "basis");
@@ -778,6 +780,16 @@ function renderInstrument() {
         "Adding the same mark-up again remakes its Part."),
       h("label", {}, "Bill", pick), titleRow,
       h("div", { class: "btns" }, h("button", { onclick: () => addToScheduleOf(pick.value, title.value) }, "Add to the Schedule")));
+  } else if (ln(docEl()) === "bill" && S.explain) {
+    const X = S.explain, sor = X.attachmentOf(S.doc, X.SOR), noc = X.attachmentOf(S.doc, X.NOC);
+    t.append(h("h3", {}, "Why the Bill is needed"),
+      h("p", { class: "note" }, "An Indian Bill carries, after its text, a Statement of Objects and Reasons (why the law is needed and what " +
+        "it does, signed by the Minister) and Notes on Clauses (what each clause provides and why). Both are published with the Bill."),
+      ro ? null : h("div", { class: "btns" },
+        h("button", { onclick: makeStatement }, sor ? "Go to the Statement of Objects and Reasons" : "Begin the Statement of Objects and Reasons"),
+        h("button", { onclick: makeNotes }, noc ? "Update the Notes on Clauses" : "Begin the Notes on Clauses")),
+      noc ? h("p", { class: "note" }, "Each clause's note is also in the Provision tab when you select the clause. Notes follow their clauses when " +
+        "clauses are moved or renumbered, and go when a clause is deleted. A clause without a note is shown as a warning (ED-12).") : null);
   } else if (ln(docEl()) === "act") {
     t.append(h("h3", {}, "Amend this Act"),
       h("p", { class: "note" }, "Make a mark-up: a copy of this Act that you edit as it should read after amendment. " +
@@ -802,6 +814,54 @@ async function downloadXml() {
   document.body.append(a); a.click(); a.remove();
   S.downloaded = true;
 }
+/* ---------------------------------------------------------------- objects and reasons, notes on clauses */
+
+function goToAttachment(att) {
+  renderAll();
+  const w = att && $(`#page section.attachment[data-eid="${CSS.escape(att.getAttribute("eId") || "")}"]`);
+  if (w) w.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+function makeStatement() {
+  const had = S.explain.attachmentOf(S.doc, S.explain.SOR);
+  if (!had) { snapshot(); S.explain.makeStatement(S.doc); changed(true); toast("Statement begun. Paragraphs 1 and 2 are for why the law is needed; paragraph 3 lists what it provides, from the chapters.", 8000); }
+  goToAttachment(S.explain.attachmentOf(S.doc, S.explain.SOR));
+}
+function makeNotes() {
+  snapshot();
+  const r = S.explain.updateNotes(S.doc);
+  changed(true);
+  toast(r.added || r.removed ? `${r.added} note${r.added === 1 ? "" : "s"} begun${r.removed ? `, ${r.removed} removed (their clauses are gone)` : ""}. ` +
+    "Each starts with what the clause provides; add why it is needed." : "Every clause has a note.", 8000);
+  goToAttachment(r.att);
+}
+/* The note on a clause, in the Provision tab: what it provides and why it is there. */
+function noteBox(x, ro) {
+  const X = S.explain; if (!X || ln(x) !== "section" || ln(docEl()) !== "bill" || !up(x, ["body"])) return null;
+  const note = X.noteFor(S.doc, x.getAttribute("eId"));
+  const box = h("div", {}, h("h3", {}, "Note on this clause"));
+  if (!note) {
+    box.append(h("p", { class: "note" }, "No note yet: say what this clause provides and why it is needed. It is published in the Notes on Clauses."));
+    if (!ro) box.append(h("div", { class: "btns" }, h("button", { onclick: () => {
+      snapshot(); X.addNote(S.doc, x); changed(true); renderAll(); select(x); setTimeout(() => { const ta = $("#tab-prov textarea.noteta"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 50);
+    } }, "Add a note")));
+    return box;
+  }
+  const content = kid(note, "content");
+  const ta = h("textarea", { class: "noteta", rows: 6, disabled: ro });
+  ta.value = content ? kids(content).filter(p => ln(p) === "p").map(p => p.textContent).join("\n\n") : "";
+  ta.addEventListener("change", () => {
+    snapshot();
+    let c = kid(note, "content"); if (!c) { c = mk("content"); note.appendChild(c); }
+    while (c.firstChild) c.removeChild(c.firstChild);
+    const paras = ta.value.split(/\n\s*\n/).map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean);
+    (paras.length ? paras : [""]).forEach(s => c.appendChild(mk("p", s)));
+    changed(true); renderAll(); select(x);
+  });
+  box.append(ta, h("div", { class: "btns" },
+    h("button", { class: "ghost", onclick: () => { const blk = note._h; if (blk) { blk.scrollIntoView({ block: "center", behavior: "smooth" }); } } }, "Show in the Notes on Clauses")));
+  return box;
+}
+
 /* ---------------------------------------------------------------- publication */
 
 /* Save keeps the draft. Publish turns the saved, checked text into what the public reads: a web page,
@@ -1276,7 +1336,10 @@ function removeProv(x) {
   let broken = 0;
   for (const r of Array.from(S.doc.getElementsByTagNameNS(AKN, "ref"))) {
     const href = r.getAttribute("href") || "";
-    if (href[0] === "#" && gone.has(href.slice(1)) && !x.contains(r)) { r.setAttribute("href", "#deleted__" + href.slice(1)); broken++; }
+    if (href[0] !== "#" || !gone.has(href.slice(1)) || x.contains(r)) continue;
+    const note = up(r, ["hcontainer"]);
+    if (note && note.getAttribute("name") === "noteOnClause") { note.remove(); continue; }   // its note goes with the clause
+    r.setAttribute("href", "#deleted__" + href.slice(1)); broken++;
   }
   if (broken) setTimeout(() => toast(`${broken} reference${broken > 1 ? "s" : ""} pointed at what you deleted: see Checks.`, 6000), 1200);
   x.remove();
@@ -1362,6 +1425,7 @@ function structural(focusX) {
     if (res.nums) toast(`Renumbered ${res.nums} provision${res.nums > 1 ? "s" : ""}` +
       (res.refs ? ` and corrected ${res.refs} reference${res.refs > 1 ? "s" : ""}.` : "."));
   }
+  if (S.explain) S.explain.syncNotes(S.doc);      // notes in the order of their clauses
   changed(true);
   if (focusX) { S.scrolling = true; setTimeout(() => (S.scrolling = false), 60); }   // go to the new provision
   renderAll();
@@ -1457,7 +1521,7 @@ function capitalSection() {          // write "Section 5" if the document alread
   return upper > lower;
 }
 function refWords(target, from) {
-  if (ln(target) === "attachment") return "the Schedule";
+  if (ln(target) === "attachment") return S.explain && !S.explain.isSchedule(target) ? txt(target.getElementsByTagNameNS(AKN, "p")[0]) : "the Schedule";
   const cap = capitalSection();
   const word = y => ln(y) === "section" && cap ? "Section" : (REF_WORD[ln(y)] || ln(y));
   const tok = y => { const n = txt(kid(y, "num")); const t = S.akn ? S.akn.numToken(n) : n.replace(/[^\w]/g, ""); return /^\(/.test(n) ? `(${t})` : t; };
@@ -1819,8 +1883,8 @@ window.addEventListener("beforeunload", () => {
 });
 
 (async () => {
-  try { S.akn = await import("./engine/akn.js"); S.bill = await import("./engine/bill.js"); S.amend = await import("./engine/amendbill.js"); }
-  catch (e) { S.akn = S.bill = S.amend = null; }
+  try { S.akn = await import("./engine/akn.js"); S.bill = await import("./engine/bill.js"); S.amend = await import("./engine/amendbill.js"); S.explain = await import("./engine/explain.js"); }
+  catch (e) { S.akn = S.bill = S.amend = S.explain = null; }
   S.spec = await api("spec");
   if (LOCAL) { $('.tabs button[data-tab="stages"]').hidden = true; $("#openwrap").hidden = false; }
   if (LOCAL && await openFromUrl()) return;
