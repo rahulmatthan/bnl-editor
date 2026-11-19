@@ -280,6 +280,8 @@ function renderAll() {
   requestAnimationFrame(() => { page.style.minHeight = ""; });
   setTimeout(() => { if (Math.abs(wrap.scrollTop - top) > 2 && !S.scrolling) wrap.scrollTop = top; }, 0);
   document.body.classList.toggle("read", S.mode === "read");
+  $("#tools").hidden = false;
+  $$("#tools button:not(#t-contents)").forEach(b => (b.hidden = S.mode !== "edit" || !!S.view));
   if (S.mode === "xml") { renderXml(); return; }
   const d = docEl();
   for (const c of kids(d)) {
@@ -325,35 +327,104 @@ async function renderXml() {
     "The file as saved on disk (the editor saves before showing it)."), h("pre", { class: "xml" }, saved)); } catch (e) {}
 }
 
+/* The contents: chapters and sections, each section opening to its sub-sections and clauses. The box at
+   the top finds a provision by its number ("14(2)(b)") or by its words. While a cross-reference is being
+   made (S.pick), a click puts the reference at the cursor instead of going to the provision. */
+const CITE_SKIP = new Set(["proviso", "hcontainer"]);
+function numbered(x) { return !!x && x.nodeType === 1 && HIER.has(ln(x)) && !CITE_SKIP.has(ln(x)) && isAkn(x) && !!txt(kid(x, "num")); }
+/* "14(2)(b)" for clause (b) of sub-section (2) of section 14; "Chapter III" for a chapter. */
+function citeOf(x) {
+  if (ln(x) === "attachment") return "Schedule";
+  const tok = y => S.akn ? S.akn.numToken(txt(kid(y, "num"))) : txt(kid(y, "num")).replace(/[^\w]/g, "");
+  if (GROUP.has(ln(x))) return `${KIND_LABEL[ln(x)] || ln(x)} ${tok(x)}`;
+  const chain = [];
+  for (let y = x; y && y.nodeType === 1 && HIER.has(ln(y)) && !GROUP.has(ln(y)); y = y.parentNode) if (numbered(y)) chain.unshift(y);
+  return chain.map((y, i) => i === 0 && ["section", "rule", "article", "paragraph"].includes(ln(y)) ? tok(y) : `(${tok(y)})`).join("");
+}
+function outlineIndex() {
+  const out = [];
+  const walk = (x, depth, sec) => {
+    for (const c of kids(x)) {
+      const name = ln(c);
+      if (name === "meta" || !isAkn(c) || name === "p" || TEXTBLOCK.has(name)) continue;
+      if (GROUP.has(name) && numbered(c)) { out.push({ x: c, grp: true }); walk(c, 0, null); }
+      else if (name === "attachment") { out.push({ x: c, grp: true, att: true }); walk(c, 0, null); }
+      else if (numbered(c)) { out.push({ x: c, depth, sec: sec || c, top: !sec }); walk(c, depth + 1, sec || c); }
+      else walk(c, depth, sec);
+    }
+  };
+  walk(docEl(), 0, null);
+  return out;
+}
+function provWords(x) { return txt(kid(x, "heading")) || firstWords(x); }
 function renderOutline() {
-  const o = $("#outline"); o.innerHTML = "";
+  const o = $("#otree"); if (!o) return; o.innerHTML = "";
+  S.open = S.open || new Set(); S.shut = S.shut || new Set();
   const counts = {};
   for (const c of S.checks) if (c.eId && (c.level === "error" || c.level === "warning")) {
     const sec = c.eId.split("__")[0];
     counts[sec] = counts[sec] === "error" ? "error" : c.level;
   }
-  const walk = (x) => {
-    for (const c of kids(x)) {
-      const name = ln(c);
-      if (name === "meta") continue;
-      if (GROUP.has(name)) {
-        o.append(h("a", { class: "grp", href: "#", onclick: e => { e.preventDefault(); select(c, true); } },
-          `${txt(kid(c, "num"))} ${txt(kid(c, "heading"))}`));
-        walk(c);
-      } else if (["section", "rule", "article"].includes(name) || (name === "paragraph" && c.closest && false)) {
-        const eid = c.getAttribute("eId") || "";
-        const a = h("a", { href: "#", "data-eid": eid, onclick: e => { e.preventDefault(); select(c, true); } },
-          `${txt(kid(c, "num"))} ${txt(kid(c, "heading")) || firstWords(c)}`,
-          counts[eid] ? h("span", { class: "dot " + counts[eid] }) : null);
-        o.append(a);
-      } else if (name === "attachment") {
-        const t = txt(c.getElementsByTagNameNS(AKN, "p")[0]) || "Schedule";
-        o.append(h("a", { class: "grp", href: "#", onclick: e => { e.preventDefault(); c._h0 && c._h0.scrollIntoView({ block: "start" }); scrollToEid(c.getAttribute("eId")); } }, t));
-      } else if (["body", "attachments", "mainBody"].includes(name)) walk(c);
-    }
+  const idx = outlineIndex();
+  const cur = idx.find(e => !e.grp && S.sel && e.x.contains(S.sel));   // the section holding the selection
+  const curSec = cur && cur.sec;
+  const go = (e, ev) => {
+    ev.preventDefault();
+    if (S.pick) { insertRef(e.x); return; }
+    if (e.att) { scrollToEid(e.x.getAttribute("eId")); return; }
+    select(e.x, true);
+    document.body.classList.remove("contents");
   };
-  walk(docEl());
-  if (S.sel) $$(`#outline a[data-eid="${(S.sel.getAttribute("eId") || "").split("__")[0]}"]`).forEach(a => a.classList.add("on"));
+  const row = (e, cls, style, ...inner) => h("a", { href: "#", class: cls, style, "data-eid": e.x.getAttribute("eId") || "", onclick: ev => go(e, ev) }, ...inner);
+  const q = ($("#ofind").value || "").trim();
+  if (q) {
+    const hits = findProvisions(idx, q);
+    if (!hits.length) o.append(h("p", { class: "note" }, "Nothing matches."));
+    for (const e of hits.slice(0, 150))
+      o.append(row(e, "hit", null, h("span", { class: "cite" }, e.grp ? txt(kid(e.x, "num")) : citeOf(e.x)), " ", e.grp ? txt(kid(e.x, "heading")) : provWords(e.x)));
+  } else {
+    const isOpen = sec => !S.shut.has(sec) && (S.open.has(sec) || sec === curSec);
+    for (const e of idx) {
+      if (e.grp) {
+        o.append(row(e, "grp", null, e.att ? (txt(e.x.getElementsByTagNameNS(AKN, "p")[0]) || "Schedule") : `${txt(kid(e.x, "num"))} ${txt(kid(e.x, "heading"))}`));
+        continue;
+      }
+      const open = isOpen(e.sec);
+      if (!e.top && !open) continue;
+      const eid = e.x.getAttribute("eId") || "";
+      const hasKids = e.top && idx.some(f => f.sec === e.x && !f.top);
+      const tog = h("span", { class: "tog" }, hasKids ? (open ? "▾" : "▸") : "");
+      if (hasKids) tog.addEventListener("click", ev => {
+        ev.preventDefault(); ev.stopPropagation();
+        if (open) { S.open.delete(e.sec); S.shut.add(e.sec); } else { S.open.add(e.sec); S.shut.delete(e.sec); }
+        renderOutline();
+      });
+      o.append(row(e, e.top ? "sec" : "sub", `padding-left:${4 + e.depth * 16}px`, tog,
+        h("span", { class: "n" }, txt(kid(e.x, "num"))), " ", provWords(e.x),
+        counts[eid] ? h("span", { class: "dot " + counts[eid] }) : null));
+    }
+  }
+  if (S.sel) $$(`#otree a[data-eid="${CSS.escape(S.sel.getAttribute("eId") || "")}"]`).forEach(a => a.classList.add("on"));
+}
+/* "14", "14(2)", "s. 14(2)(b)", "section 14 (2)" find by number; anything else by words, every word. */
+function findProvisions(idx, q) {
+  const flat = s => s.toLowerCase().replace(/\s+/g, "");
+  const cite = flat(q.replace(/^(section|sec\.?|s\.|clause|sub-section|sub-clause)\s*/i, "")).replace(/\.$/, "");
+  if (/^\d+[a-z]*(\([0-9a-z]*\)?)*$/.test(cite)) {
+    const cands = idx.filter(e => !e.grp);
+    const exact = cands.filter(e => flat(citeOf(e.x)) === cite);
+    const secOf = s => s.split("(")[0];      // "14" finds 14, 14(1), 14(2)(b), not 140
+    const pre = cands.filter(e => { const c = flat(citeOf(e.x)); return !exact.includes(e) && c.startsWith(cite) && secOf(c) === secOf(cite); });
+    return [...exact, ...pre];
+  }
+  const ws = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return idx.filter(e => {
+    if (e.att) return false;
+    const own = e.grp ? `${txt(kid(e.x, "num"))} ${txt(kid(e.x, "heading"))}` :
+      [txt(kid(e.x, "num")), txt(kid(e.x, "heading")), ...kids(e.x).filter(c => TEXTBLOCK.has(ln(c))).map(txt)].join(" ");
+    const t = own.toLowerCase();
+    return ws.every(w => t.includes(w));
+  });
 }
 function firstWords(x) { const t = txt(x.getElementsByTagNameNS(AKN, "p")[0]); return t.length > 48 ? t.slice(0, 48) + "…" : t; }
 function scrollToEid(eid) { const el = $(`#page [data-eid="${CSS.escape(eid || "")}"]`); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
@@ -365,9 +436,11 @@ function select(x, scroll) {
   S.sel = x;
   $$("#page .prov.sel").forEach(e => e.classList.remove("sel"));
   if (x._h) { x._h.classList.add("sel"); if (scroll) x._h.scrollIntoView({ block: "center", behavior: "smooth" }); }
-  $$("#outline a.on").forEach(a => a.classList.remove("on"));
-  const sec = (x.getAttribute("eId") || "").split("__")[0];
-  $$(`#outline a[data-eid="${CSS.escape(sec)}"]`).forEach(a => a.classList.add("on"));
+  // the contents open at the section being worked in, and mark the provision itself
+  let top = x; while (top && top.parentNode && numbered(top.parentNode)) top = top.parentNode;
+  if (top !== S.selTop) { S.selTop = top; renderOutline(); }
+  $$("#otree a.on").forEach(a => a.classList.remove("on"));
+  $$(`#otree a[data-eid="${CSS.escape(x.getAttribute("eId") || "")}"]`).forEach(a => { a.classList.add("on"); a.scrollIntoView({ block: "nearest" }); });
   renderInspector();
 }
 
@@ -1164,6 +1237,7 @@ function structural(focusX) {
       (res.refs ? ` and corrected ${res.refs} reference${res.refs > 1 ? "s" : ""}.` : "."));
   }
   changed(true);
+  if (focusX) { S.scrolling = true; setTimeout(() => (S.scrolling = false), 60); }   // go to the new provision
   renderAll();
   if (focusX) {
     select(focusX, true);
@@ -1181,6 +1255,177 @@ function placeCaret(el, atEnd) {
   const r = document.createRange(); r.selectNodeContents(el); r.collapse(!atEnd);
   const s = getSelection(); s.removeAllRanges(); s.addRange(r);
 }
+
+/* ---------------------------------------------------------------- the toolbar: new provisions */
+
+function up(x, names) { for (let y = x; y && y.nodeType === 1; y = y.parentNode) if (names.includes(ln(y))) return y; return null; }
+/* The provision being worked in: where the cursor is, else the one selected. */
+function here() {
+  const a = document.activeElement, blk = a && a.closest && a.closest("#page .prov");
+  return (blk && blk._x) || S.sel;
+}
+function addChildOf(x, kind) {
+  snapshot();
+  const last = hierKids(x).filter(c => ln(c) === kind).pop();
+  const n = newProv(kind, last ? nextNum(txt(kid(last, "num")), kind) : FIRST_NUM[kind]);
+  if (!GROUP.has(ln(x))) contentToIntro(x);
+  insertChild(x, n);
+  structural(n);
+  return n;
+}
+function newSection() {
+  const x = here();
+  const sec = x && up(x, ["section"]);
+  if (sec) return addSibling(sec);
+  const grp = x && up(x, [...GROUP]);
+  if (grp) return addChildOf(grp, "section");
+  const body = kid(docEl(), "body");
+  if (!body) { toast("This instrument has no body to add a section to."); return; }
+  const secs = Array.from(body.getElementsByTagNameNS(AKN, "section"));
+  if (secs.length) return addSibling(secs[secs.length - 1]);
+  snapshot();
+  const n = newProv("section", "1."); body.appendChild(n); structural(n); return n;
+}
+function newSubsection() {
+  const x = here(), sec = x && up(x, ["section"]);
+  if (!sec) { toast("Click in the section the sub-section belongs to."); return; }
+  const sub = up(x, ["subsection"]);
+  if (sub && sec.contains(sub)) return addSibling(sub);
+  if (!hierKids(sec).length) {
+    // A section of plain words: the words become sub-section (1), and the new one is (2).
+    snapshot();
+    const c = kid(sec, "content");
+    const s1 = mk("subsection"); s1.setAttribute("eId", newTmp()); s1.appendChild(mk("num", "(1)"));
+    if (c && txt(c)) {
+      sec.replaceChild(s1, c); s1.appendChild(c);
+      const s2 = newProv("subsection", "(2)"); insertChild(sec, s2); structural(s2); return s2;
+    }
+    if (c) c.remove();
+    const cc = mk("content"); cc.appendChild(mk("p", "")); s1.appendChild(cc); insertChild(sec, s1);
+    structural(s1); return s1;
+  }
+  return addChildOf(sec, "subsection");
+}
+function newClause() {
+  const x = here();
+  const cl = x && up(x, ["clause"]);
+  if (cl) return addSibling(cl);
+  const parent = x && (up(x, ["subsection", "subrule", "paragraph"]) || up(x, ["section", "rule", "article"]));
+  if (!parent) { toast("Click in the sub-section the clause belongs to."); return; }
+  if (hierKids(parent).some(c => ["subsection", "subrule"].includes(ln(c)))) { toast("Click in the sub-section the clause belongs to."); return; }
+  return addChildOf(parent, "clause");
+}
+
+/* ---------------------------------------------------------------- cross-references */
+
+/* Put the cursor in the text (or select the words to link), press Cross-reference or ⌘K, and choose the
+   provision in the contents. The words follow Indian drafting: "clause (b) of sub-section (2) of
+   section 14", leaving out what the reference sits in ("clause (b)" within the same sub-section). They are
+   kept right by renumbering like every other reference. */
+const REF_WORD = { section: "section", subsection: "sub-section", clause: "clause", subclause: "sub-clause", point: "item",
+  paragraph: "paragraph", subparagraph: "sub-paragraph", rule: "rule", subrule: "sub-rule", article: "article", item: "item",
+  chapter: "Chapter", part: "Part", subchapter: "Sub-Chapter", subpart: "Sub-Part" };
+function capitalSection() {          // write "Section 5" if the document already does, else "section 5"
+  let upper = 0, lower = 0;
+  for (const r of S.doc.getElementsByTagNameNS(AKN, "ref")) { const t = r.textContent; if (/^Section\b/.test(t)) upper++; else if (/^section\b/.test(t)) lower++; }
+  return upper > lower;
+}
+function refWords(target, from) {
+  if (ln(target) === "attachment") return "the Schedule";
+  const cap = capitalSection();
+  const word = y => ln(y) === "section" && cap ? "Section" : (REF_WORD[ln(y)] || ln(y));
+  const tok = y => { const n = txt(kid(y, "num")); const t = S.akn ? S.akn.numToken(n) : n.replace(/[^\w]/g, ""); return /^\(/.test(n) ? `(${t})` : t; };
+  if (from && target.contains(from)) return `this ${word(target)}`;
+  if (GROUP.has(ln(target))) return `${word(target)} ${tok(target)}`;
+  const chain = [];
+  for (let y = target; y && y.nodeType === 1 && HIER.has(ln(y)) && !GROUP.has(ln(y)); y = y.parentNode) {
+    if (!numbered(y)) continue;
+    if (y !== target && from && y.contains(from)) break;     // what the reference is written in is not named
+    chain.push(`${word(y)} ${tok(y)}`);
+  }
+  return chain.join(" of ");
+}
+function textOffset(el, node, off) { const r = document.createRange(); r.setStart(el, 0); r.setEnd(node, off); return r.toString().length; }
+function rangeAt(el, start, end) {
+  const r = document.createRange(), w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let pos = 0, n, s = null;
+  while ((n = w.nextNode())) {
+    const len = n.nodeValue.length;
+    if (!s && start <= pos + len) { r.setStart(n, start - pos); s = n; }
+    if (s && end <= pos + len) { r.setEnd(n, end - pos); return r; }
+    pos += len;
+  }
+  r.selectNodeContents(el); r.collapse(false); return r;
+}
+function startPick() {
+  if (S.mode !== "edit" || S.view) return;
+  const sel = getSelection(), r = sel.rangeCount ? sel.getRangeAt(0) : null;
+  const node = r && (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentNode);
+  const el = node && node.closest && node.closest("#page [contenteditable]");
+  if (!el || !el._x) { toast("Click in the text where the reference goes (or select the words to link), then press Cross-reference."); return; }
+  if (node.closest("a.ref")) { toast("That is already a reference."); return; }
+  S.pick = { p: el._x, start: textOffset(el, r.startContainer, r.startOffset), end: textOffset(el, r.endContainer, r.endOffset), words: r.toString() };
+  document.body.classList.add("picking", "contents");
+  $("#picknote").hidden = false;
+  const f = $("#ofind"); f.value = ""; renderOutline(); f.focus();
+}
+function endPick() {
+  S.pick = null;
+  document.body.classList.remove("picking", "contents");
+  $("#picknote").hidden = true;
+  if ($("#ofind").value) { $("#ofind").value = ""; renderOutline(); }
+}
+function insertRef(target) {
+  const pk = S.pick; endPick();
+  const el = pk && pk.p._h;
+  if (!el || !el.isConnected) { toast("The place for the reference has gone. Click in the text and try again."); return; }
+  const eid = target.getAttribute("eId");
+  if (!eid) { toast("That provision has no identifier yet. Save, then try again."); return; }
+  const from = provOf(pk.p);
+  const words = pk.words.trim() ? pk.words : refWords(target, from);
+  const r = rangeAt(el, pk.start, pk.end);
+  if (!r.collapsed) r.deleteContents();
+  const a = h("a", { class: "ref", "data-attrs": JSON.stringify([[null, "href", "#" + eid]]), title: "#" + eid }, words);
+  r.insertNode(a);
+  const before = a.previousSibling, after = a.nextSibling;
+  if (before && before.nodeType === 3 && /[^\s(“‘—-]$/.test(before.nodeValue)) before.nodeValue += " ";
+  let caretNode = a;
+  if (after && after.nodeType === 3 && /^[\w(]/.test(after.nodeValue)) after.nodeValue = " " + after.nodeValue;
+  else if (!after || (after.nodeType === 3 && after.nodeValue === "")) { caretNode = document.createTextNode(" "); a.after(caretNode); }
+  syncEl(el); changed(false);
+  el.focus({ preventScroll: true });
+  const c = document.createRange(); c.setStartAfter(caretNode); c.collapse(true);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(c);
+  el.scrollIntoView({ block: "nearest" });
+  toast(`Linked “${words}” to ${citeOf(target) || "the Schedule"}.`);
+}
+
+for (const [id, fn] of [["#t-sec", newSection], ["#t-sub", newSubsection], ["#t-cl", newClause], ["#t-ref", startPick]]) {
+  $(id).addEventListener("mousedown", e => e.preventDefault());      // keep the cursor where it is
+  $(id).addEventListener("click", async () => { await flush(); fn(); });
+}
+$("#t-contents").addEventListener("click", () => document.body.classList.toggle("contents"));
+$("#pickcancel").addEventListener("click", endPick);
+$("#pagewrap").addEventListener("mousedown", e => { if (!S.pick && !e.target.closest("#tools")) document.body.classList.remove("contents"); });
+$("#ofind").addEventListener("input", () => renderOutline());
+$("#ofind").addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.preventDefault(); if (S.pick) endPick(); else { e.target.value = ""; renderOutline(); } }
+  if (e.key === "Enter") { e.preventDefault(); const a = $("#otree a"); if (a) a.click(); }
+  if (e.key === "ArrowDown") { e.preventDefault(); const a = $("#otree a"); if (a) a.focus(); }
+});
+$("#otree").addEventListener("keydown", e => {
+  const a = e.target.closest("a"); if (!a) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const all = $$("#otree a"), i = all.indexOf(a), nx = all[i + (e.key === "ArrowDown" ? 1 : -1)];
+    if (nx) nx.focus(); else if (e.key === "ArrowUp") $("#ofind").focus();
+  }
+  if (e.key === "Escape" && S.pick) { e.preventDefault(); endPick(); }
+});
+document.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !$("#editor").hidden) { e.preventDefault(); flush().then(startPick); }
+  if (e.key === "Escape" && document.body.classList.contains("contents") && !S.pick) document.body.classList.remove("contents");
+}, true);
 
 $("#undo").addEventListener("click", () => {
   const prev = S.undo.pop(); if (!prev) return;

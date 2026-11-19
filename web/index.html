@@ -52,8 +52,20 @@
 </main>
 
 <div id="editor" hidden>
-  <nav id="outline"></nav>
-  <main id="pagewrap"><div id="banner" hidden></div><article id="page"></article></main>
+  <nav id="outline">
+    <div id="ohead">
+      <div id="picknote" hidden><b>Choose what to refer to.</b> Click a section, sub-section or clause. <button id="pickcancel" class="ghost">Cancel</button></div>
+      <input id="ofind" type="search" placeholder="Find: 14(2), or words" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="otree"></div>
+  </nav>
+  <main id="pagewrap"><div id="tools" hidden>
+      <button id="t-contents" class="ghost" title="Show the contents">☰ Contents</button>
+      <button id="t-sec" title="A new section after this one">+ Section</button>
+      <button id="t-sub" title="A new sub-section in this section">+ Sub-section</button>
+      <button id="t-cl" title="A new clause in this sub-section">+ Clause</button>
+      <button id="t-ref" title="Refer to another provision at the cursor (⌘K)">↗ Cross-reference</button>
+    </div><div id="banner" hidden></div><article id="page"></article></main>
   <aside id="side">
     <div class="tabs">
       <button data-tab="prov" class="on">Provision</button>
