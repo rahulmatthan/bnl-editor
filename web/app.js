@@ -802,6 +802,70 @@ async function downloadXml() {
   document.body.append(a); a.click(); a.remove();
   S.downloaded = true;
 }
+/* ---------------------------------------------------------------- publication */
+
+/* Save keeps the draft. Publish turns the saved, checked text into what the public reads: a web page,
+   the same page as a PDF, and the BNL XML both are made from. A document with errors is not published. */
+function saveFile(name, data, type) {
+  const a = h("a", { href: URL.createObjectURL(new Blob([data], { type })), download: name });
+  document.body.append(a); a.click(); a.remove();
+}
+async function openPublish() {
+  if (!S.doc || S.view) return;
+  const dlg = $("#pubdlg"), b = $("#pubbody");
+  b.innerHTML = ""; b.append(h("h2", {}, "Publish"), h("p", { class: "note" }, "Saving and checking…"));
+  if (!dlg.open) dlg.showModal();
+  await save(true);
+  let P, xml, d, sha;
+  try {
+    P = await import("./engine/publish.js");
+    xml = await api("i/" + S.id);
+    d = P.describe(parseXml(xml));
+    sha = await P.sha256(xml);
+  } catch (e) { b.append(h("p", { class: "err" }, "Could not prepare the publication: " + e.message)); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const names = { xml: d.base + ".xml", html: d.base + ".html" };
+  const page = (extra = {}) => P.toHtml(xml, { xmlName: names.xml, sha, published: today, ...extra });
+  const errors = S.checks.filter(c => c.level === "error"), warnings = S.checks.filter(c => c.level === "warning");
+  const blocked = errors.length > 0;
+  const row = (title, about, ...btns) => h("div", { class: "pubrow" },
+    h("div", {}, h("b", {}, title), h("p", { class: "note" }, about)), h("div", { class: "pubbtns" }, ...btns));
+  const btn = (label, fn, primary) => h("button", { class: primary ? "primary" : "", disabled: blocked, onclick: fn }, label);
+  b.innerHTML = "";
+  b.append(
+    h("div", { class: "pubhead" }, h("h2", {}, "Publish"), h("button", { class: "ghost", onclick: () => dlg.close() }, "Close")),
+    h("p", {}, h("b", {}, d.title), h("br"), h("span", { class: "mono note" }, d.expression || "")),
+    blocked ? h("div", { class: "pubwarn err" }, `${errors.length} error${errors.length > 1 ? "s" : ""} must be fixed before this can be published. `,
+        h("button", { onclick: () => { dlg.close(); tab("checks"); } }, "Show the checks"))
+      : h("div", { class: "pubwarn ok" }, "Valid BNL. " + (warnings.length ? `${warnings.length} warning${warnings.length > 1 ? "s" : ""} to review; they do not stop publication.` : "No warnings.")),
+    problems().length ? h("div", { class: "publist" }, ...problems().slice(0, 30).map(c =>
+      h("div", { class: "chk " + c.level, title: "Go to it", onclick: () => { dlg.close(); goToCheck(c); } },
+        h("span", { class: "code" }, c.code), c.message, h("span", { class: "go" }, "Go to it →")))) : null,
+    row("Web page", "A page anyone can read in a browser: contents, links between provisions, and a link to every provision (…html#sec_14__subsec_2).",
+      btn("Preview", () => {
+        const xmlUrl = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
+        window.open(URL.createObjectURL(new Blob([page({ xmlHref: xmlUrl })], { type: "text/html" })), "_blank");
+      }),
+      btn("Download .html", () => saveFile(names.html, page(), "text/html"), true)),
+    row("PDF", "The same page laid out on A4 with page numbers. In the print window choose Save as PDF.",
+      btn("Save PDF…", () => {
+        const f = h("iframe", { style: "position:fixed;width:0;height:0;border:0;right:0;bottom:0" });
+        f.srcdoc = page({ title: d.base });
+        f.onload = () => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 60000); };
+        document.body.append(f);
+      }, true)),
+    row("BNL XML", "The machine-readable text (Akoma Ntoso with the BNL attributes) that the page and the PDF are made from.",
+      btn("Download .xml", () => saveFile(names.xml, xml, "application/xml"), true)),
+    h("p", { class: "note" }, "To put it online, upload the .html and the .xml to the same folder of any website: the page links to the XML. " +
+      "The page and the PDF give the XML's SHA-256, so anyone can check they carry the same text:"),
+    h("p", { class: "mono note sha" }, sha));
+}
+$("#publish").addEventListener("click", openPublish);
+$("#status").addEventListener("click", e => { if (problems().length) nextProblem(e.shiftKey); });
+document.addEventListener("keydown", e => {
+  if (e.key === "F8" && !$("#editor").hidden) { e.preventDefault(); nextProblem(e.shiftKey); }
+});
+
 function refShowAs(ref) { const refs = kid(meta(), "references"); if (!refs || !ref) return ""; const r = kids(refs).find(c => "#" + c.getAttribute("eId") === ref); return r ? r.getAttribute("showAs") : ""; }
 function byEid(eid) { if (!eid) return null; for (const el of S.doc.getElementsByTagName("*")) if (el.getAttribute("eId") === eid) return el; return null; }
 
@@ -858,14 +922,62 @@ async function renumberIds() {
 
 /* ---------------------------------------------------------------- checks */
 
+/* Errors and warnings in the order they come in the text, errors first. */
+function problems() {
+  const order = new Map(); let i = 0;
+  for (const el of S.doc.getElementsByTagName("*")) { const e = el.getAttribute("eId"); if (e) order.set(e, i++); }
+  const rank = { error: 0, warning: 1 };
+  return S.checks.filter(c => c.level in rank)
+    .sort((a, b) => rank[a.level] - rank[b.level] || (order.get(a.eId) ?? 1e9) - (order.get(b.eId) ?? 1e9) || (a.line || 0) - (b.line || 0));
+}
+/* Where a check points in the text: its provision, or for an amendment the provision that makes it. */
+function checkTarget(c) {
+  let el = byEid(c.eId);
+  if (el && !provOf(el)) { const src = kid(el, "source"); el = src ? byEid((src.getAttribute("href") || "").slice(1)) : el; }
+  if (!el && c.eId && c.eId.startsWith("deleted__")) return null;
+  return el;
+}
+function goToCheck(c) {
+  if (S.view) closeView();
+  if (S.mode === "xml") { S.mode = "edit"; $$("#modes button").forEach(z => z.classList.toggle("on", z.dataset.mode === "edit")); renderAll(); }
+  const el = checkTarget(c), p = el && provOf(el);
+  S.curCheck = c;
+  $$(".chk.cur").forEach(r => r.classList.remove("cur"));
+  if (p) {
+    tab("prov"); select(p, true);
+    if (p._h) { p._h.classList.remove("flash"); void p._h.offsetWidth; p._h.classList.add("flash"); }
+    // a reference to something deleted: put the cursor on it
+    const bad = p._h && $('a.ref[title^="#deleted__"]', p._h);
+    if (bad && c.code === "BNL-8") { const r = document.createRange(); r.selectNodeContents(bad); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+    return true;
+  }
+  if (el && meta().contains(el)) { tab("inst"); toast(`${c.code}: this is in the instrument's details (the Instrument tab), not the text.`, 6000); return true; }
+  if (el && el._h) { el._h.scrollIntoView({ block: "center", behavior: "smooth" }); return true; }
+  tab("checks");
+  toast(c.line ? `${c.code} is at line ${c.line} of the XML. Open the XML view to see it.` : `${c.code} is about the document as a whole.`, 6000);
+  return false;
+}
+/* The status badge and F8 step through the problems; Shift steps back. */
+function nextProblem(back) {
+  const list = problems();
+  if (!list.length) { toast("No errors or warnings."); return; }
+  let i = S.curCheck ? list.findIndex(c => c.code === S.curCheck.code && c.eId === S.curCheck.eId && c.message === S.curCheck.message) : -1;
+  i = i < 0 ? (back ? list.length - 1 : 0) : (i + (back ? -1 : 1) + list.length) % list.length;
+  const c = list[i];
+  goToCheck(c);
+  toast(`${c.level === "error" ? "Error" : "Warning"} ${i + 1} of ${list.length} · ${c.code}: ${plainMessage(c, provOf(checkTarget(c)))}`, 9000);
+}
+/* A check's message, said about this place where that helps. */
+function plainMessage(c, p) {
+  if (c.code === "BNL-8" && p && p._h) {
+    const bad = $$('a.ref[title^="#deleted__"]', p._h).map(a => `“${a.textContent}”`);
+    if (bad.length) return `${bad.join(", ")} refers to a provision that has been deleted. Click in it and press Cross-reference (⌘K) to point it somewhere else, or delete the words.`;
+  }
+  return c.message;
+}
 function checkRow(c) {
   const where = c.eId ? c.eId : c.line ? "line " + c.line : "";
-  const go = () => {
-    let el = byEid(c.eId);
-    if (el && !provOf(el)) { const src = kid(el, "source"); el = src ? byEid((src.getAttribute("href") || "").slice(1)) : null; }
-    if (el && provOf(el)) { tab("prov"); select(provOf(el), true); }
-  };
-  return h("div", { class: "chk " + c.level, onclick: go },
+  return h("div", { class: "chk " + c.level, title: "Go to it", onclick: () => goToCheck(c) },
     h("span", { class: "code" }, c.code), c.message, where ? h("div", { class: "where mono" }, where) : null);
 }
 function renderChecks() {
@@ -876,15 +988,27 @@ function renderChecks() {
     h("p", { class: "note" }, `Every save runs the Akoma Ntoso 3.0 schema (AKN), the BNL ${S.spec.version} rulebook (BNL-n) and the editor's own checks (ED-n). Errors stop authentication; warnings do not.`),
     h("div", { class: "btns" }, h("button", { onclick: async () => { await save(true); renderChecks(); } }, "Save and check now")));
   if (!S.checks.length) t.append(h("p", { class: "status ok" }, "Valid BNL. No problems found."));
-  S.checks.forEach(c => t.append(checkRow(c)));
+  const probs = problems();
+  if (probs.length) t.append(h("div", { class: "btns" },
+    h("button", { onclick: () => nextProblem(true), title: "Shift-F8" }, "↑ Previous"),
+    h("button", { onclick: () => nextProblem(false), title: "F8" }, "↓ Next problem")));
+  [...probs, ...S.checks.filter(c => !probs.includes(c))].forEach(c => t.append(checkRow(c)));
 }
 function markChecks() {
   $$("#page .prov.has-error, #page .prov.has-warning").forEach(e => e.classList.remove("has-error", "has-warning"));
+  $$("#page .issue").forEach(e => e.remove());
   for (const c of S.checks) {
     if (!c.eId || !(c.level === "error" || c.level === "warning")) continue;
-    const el = byEid(c.eId);
+    const el = checkTarget(c);
     const p = el && provOf(el);
-    if (p && p._h) p._h.classList.add(c.level === "error" ? "has-error" : "has-warning");
+    if (p && p._h) {
+      p._h.classList.add(c.level === "error" ? "has-error" : "has-warning");
+      // the problem is said where it is, under the provision's number and heading
+      const note = h("div", { class: "issue " + c.level, contenteditable: "false", title: "Show it in Checks",
+        onclick: () => { tab("checks"); } }, h("b", {}, c.code), " ", plainMessage(c, p));
+      const hd = $(":scope > .hd", p._h);
+      if (hd) hd.after(note); else p._h.prepend(note);
+    }
   }
   const n = S.checks.filter(c => c.level === "error").length, w = S.checks.filter(c => c.level === "warning").length;
   const cc = $("#checkcount"); cc.textContent = n ? `(${n})` : w ? `(${w})` : ""; cc.className = n ? "err" : "";
@@ -896,9 +1020,11 @@ function markupChecks(list) {
 }
 function statusFromChecks() {
   const n = S.checks.filter(c => c.level === "error").length, w = S.checks.filter(c => c.level === "warning").length;
-  if (n) setStatus("err", `${n} error${n > 1 ? "s" : ""}`);
-  else if (w) setStatus("warn", `Valid BNL · ${w} warning${w > 1 ? "s" : ""}`);
+  if (n) setStatus("err", `${n} error${n > 1 ? "s" : ""}${w ? ` · ${w} warning${w > 1 ? "s" : ""}` : ""} ›`);
+  else if (w) setStatus("warn", `Valid BNL · ${w} warning${w > 1 ? "s" : ""} ›`);
   else setStatus("ok", "Valid BNL");
+  $("#status").title = n || w ? "Go to the next problem (F8; Shift goes back)" : "";
+  $("#status").classList.toggle("go", !!(n || w));
 }
 
 /* ---------------------------------------------------------------- stages (Chapter V) */
@@ -1363,8 +1489,12 @@ function startPick() {
   const node = r && (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentNode);
   const el = node && node.closest && node.closest("#page [contenteditable]");
   if (!el || !el._x) { toast("Click in the text where the reference goes (or select the words to link), then press Cross-reference."); return; }
-  if (node.closest("a.ref")) { toast("That is already a reference."); return; }
-  S.pick = { p: el._x, start: textOffset(el, r.startContainer, r.startOffset), end: textOffset(el, r.endContainer, r.endOffset), words: r.toString() };
+  // in an existing reference: point it somewhere else (how a broken one is mended)
+  const old = node.closest("a.ref");
+  const repoint = old ? $$("a.ref", el).indexOf(old) : -1;
+  S.pick = { p: el._x, start: textOffset(el, r.startContainer, r.startOffset), end: textOffset(el, r.endContainer, r.endOffset), words: r.toString(), repoint };
+  if (old) $("#picknote b").textContent = "Choose what this reference should point to.";
+  else $("#picknote b").textContent = "Choose what to refer to.";
   document.body.classList.add("picking", "contents");
   $("#picknote").hidden = false;
   const f = $("#ofind"); f.value = ""; renderOutline(); f.focus();
@@ -1382,6 +1512,16 @@ function insertRef(target) {
   const eid = target.getAttribute("eId");
   if (!eid) { toast("That provision has no identifier yet. Save, then try again."); return; }
   const from = provOf(pk.p);
+  if (pk.repoint >= 0) {
+    const old = $$("a.ref", el)[pk.repoint];
+    if (old) {
+      const words = refWords(target, from);
+      old.dataset.attrs = JSON.stringify([[null, "href", "#" + eid]]); old.title = "#" + eid; old.textContent = words;
+      syncEl(el); changed(false); markChecks();
+      toast(`The reference now reads “${words}”.`);
+      return;
+    }
+  }
   const words = pk.words.trim() ? pk.words : refWords(target, from);
   const r = rangeAt(el, pk.start, pk.end);
   if (!r.collapsed) r.deleteContents();
@@ -1585,7 +1725,7 @@ async function load(id, keepView) {
 
 async function showLibrary() {
   $("#library").hidden = false; $("#editor").hidden = true;
-  ["#modes", "#save", "#undo"].forEach(s => ($(s).hidden = true));
+  ["#modes", "#save", "#undo", "#publish"].forEach(s => ($(s).hidden = true));
   $("#doctitle").textContent = ""; setStatus("", "");
   $("#libver").textContent = S.spec.version;
   const items = await api("instruments");
@@ -1624,7 +1764,7 @@ async function route() {
   const m = /^#\/i\/([a-z0-9-]+)/.exec(location.hash);
   if (!m) return showLibrary();
   $("#library").hidden = true; $("#editor").hidden = false;
-  ["#modes", "#save"].forEach(s => ($(s).hidden = false));
+  ["#modes", "#save", "#publish"].forEach(s => ($(s).hidden = false));
   try { await load(m[1]); tab("prov"); }
   catch (e) { $("#page").innerHTML = ""; $("#page").append(h("p", {}, e.message)); }
 }

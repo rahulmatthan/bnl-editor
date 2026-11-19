@@ -63,6 +63,19 @@ Schedule shall be amended in the manner specified therein."); or choose *A new B
 title. Adding the same mark-up again remakes its Part in place. Each paragraph is the source of its
 textualMods, so the check ED-11 is satisfied.
 
+## Publishing
+
+*Save* keeps the draft. *Publish* saves, checks, and (if there are no errors) gives the three forms
+the public reads, all made from the same saved file:
+
+- **Web page** (.html): one self-contained file with a contents list, links between provisions, and a
+  link to every provision by its eId (`…html#sec_14__subsec_2`). *Preview* opens it in a new tab.
+- **PDF**: the same page laid out on A4 with page numbers; the print window's *Save as PDF*.
+- **BNL XML** (.xml): the Akoma Ntoso file with the BNL attributes that the other two are made from.
+
+The page and the PDF name the XML file and give its SHA-256, so anyone can check that they carry the
+same text. To put a law online, upload the .html and the .xml to the same folder of any website.
+
 ## How it works
 
 - **The file is the truth.** Each instrument is `instruments/<id>/<id>.xml`. The page loads it into

@@ -214,6 +214,33 @@ body.read [data-ph]:empty { display: none; }
   #pagewrap { padding: 16px 16px 60px; }
   #doctitle { display: none; }
 }
+#pubdlg { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(620px, calc(100vw - 32px));
+  background: var(--bg); color: var(--ink); box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+#pubdlg::backdrop { background: rgba(0,0,0,.3); }
+#pubdlg h2 { margin: 0; font-size: 18px; }
+.pubhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.pubwarn { padding: 8px 10px; border-radius: 8px; margin: 8px 0 12px; font-size: 13px; }
+.pubwarn.ok { background: var(--ok-soft); color: var(--ok); }
+.pubwarn.err { background: var(--err-soft); color: var(--err); }
+.pubrow { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--line); }
+.pubrow p { margin: 2px 0 0; }
+.pubbtns { display: flex; gap: 6px; flex-shrink: 0; }
+#pubdlg button.primary, #publish { background: var(--accent); color: #fff; border-color: var(--accent); }
+#pubdlg button:disabled { opacity: .45; cursor: not-allowed; }
+#pubdlg .sha { word-break: break-all; font-size: 11px; }
+@media (max-width: 560px) { .pubrow { flex-direction: column; align-items: stretch; } }
+.status.go { cursor: pointer; }
+.status.go:hover { filter: brightness(.95); text-decoration: underline; }
+.issue { font: 12px/1.4 var(--ui); margin: 2px 0 6px; padding: 3px 8px; border-radius: 6px; cursor: pointer; user-select: none; }
+.issue.error { background: var(--err-soft); color: var(--err); }
+.issue.warning { background: var(--warn-soft); color: var(--warn); }
+body.read .issue { display: none; }
+.chk.cur, .chk:hover { box-shadow: inset 0 0 0 1px var(--line); }
+.publist { max-height: 180px; overflow: auto; margin: -4px 0 10px; }
+.publist .chk { display: flex; gap: 6px; align-items: baseline; }
+.publist .go { margin-left: auto; color: var(--accent); white-space: nowrap; font-size: 12px; }
+@keyframes flash { 0% { background: var(--sel); } 100% { background: transparent; } }
+.prov.flash { animation: flash 1.6s ease-out; }
 label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--muted); margin-top: 10px; }
 label.check input { margin-top: 2px; }
 a.ref[title^="#deleted__"] { color: var(--err); text-decoration: underline wavy; }
